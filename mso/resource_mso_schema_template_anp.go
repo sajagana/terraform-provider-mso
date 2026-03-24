@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
+	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
@@ -55,6 +56,9 @@ func resourceMSOSchemaTemplateAnp() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				Computed: true,
+				// Computed:true should be set to not allow empty string input ever due to error in NDO
+				// when replace function is called with empty string a follow up replace is not allowed anymore
+				// Error: "replace operation does not apply: doc is missing key: /templates/0/anps/0/description: missing value"{}
 			},
 		}),
 	}
@@ -175,42 +179,35 @@ func resourceMSOSchemaTemplateAnpUpdate(d *schema.ResourceData, m interface{}) e
 	log.Printf("[DEBUG] Schema Template Anp: Beginning Updating")
 	msoClient := m.(*client.Client)
 
-	var schemaId string
-	if schema_id, ok := d.GetOk("schema_id"); ok {
-		schemaId = schema_id.(string)
+	schemaId := d.Get("schema_id").(string)
+	templateName := d.Get("template").(string)
+	anpName := d.Get("name").(string)
+
+	updatePath := fmt.Sprintf("/templates/%s/anps/%s", templateName, anpName)
+	payloadCont := container.New()
+	payloadCont.Array()
+
+	if d.HasChange("display_name") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/displayName", updatePath), d.Get("display_name").(string))
+		if err != nil {
+			return err
+		}
 	}
 
-	var templateName string
-	if template, ok := d.GetOk("template"); ok {
-		templateName = template.(string)
+	if d.HasChange("description") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+		if err != nil {
+			return err
+		}
 	}
 
-	var Name string
-	if name, ok := d.GetOk("name"); ok {
-		Name = name.(string)
-	}
-
-	var displayName string
-	if display_name, ok := d.GetOk("display_name"); ok {
-		displayName = display_name.(string)
-	}
-
-	var description string
-	if Description, ok := d.GetOk("description"); ok {
-		description = Description.(string)
-	}
-
-	schemaTemplateAnpApp := models.NewSchemaTemplateAnp("replace", "/templates/"+templateName+"/anps/"+Name, Name, displayName, description)
-
-	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), schemaTemplateAnpApp)
+	err := doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaId), payloadCont)
 	if err != nil {
-		log.Println(err)
 		return err
 	}
 
-	id := models.StripQuotes(Name)
-	d.SetId(fmt.Sprintf("%v", id))
-	log.Printf("[DEBUG] %s: Updating finished successfully", Name)
+	d.SetId(fmt.Sprintf("%v", models.StripQuotes(anpName)))
+	log.Printf("[DEBUG] %s: Updating finished successfully", anpName)
 
 	return resourceMSOSchemaTemplateAnpRead(d, m)
 }
