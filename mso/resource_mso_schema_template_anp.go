@@ -55,10 +55,6 @@ func resourceMSOSchemaTemplateAnp() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
-				// Computed:true should be set to not allow empty string input ever due to error in NDO
-				// when replace function is called with empty string a follow up replace is not allowed anymore
-				// Error: "replace operation does not apply: doc is missing key: /templates/0/anps/0/description: missing value"{}
 			},
 		}),
 	}
@@ -195,7 +191,12 @@ func resourceMSOSchemaTemplateAnpUpdate(d *schema.ResourceData, m interface{}) e
 	}
 
 	if d.HasChange("description") {
-		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+		old, _ := d.GetChange("description")
+		operation := "replace"
+		if old == "" {
+			operation = "add"
+		}
+		err := addPatchPayloadToContainer(payloadCont, operation, fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
 		if err != nil {
 			return err
 		}
